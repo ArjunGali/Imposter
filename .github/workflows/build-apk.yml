@@ -1,0 +1,55 @@
+name: Build APK
+
+on:
+  push:
+    branches:
+      - claude/imposter-who-android-apk-359fkw
+    paths-ignore:
+      - 'release/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease --no-daemon
+        working-directory: android
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: imposter-who-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Commit APK to branch
+        run: |
+          mkdir -p release
+          cp android/app/build/outputs/apk/release/app-release.apk release/imposter-who-v1.0.0.apk
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add release/imposter-who-v1.0.0.apk
+          git commit -m "Add built release APK [skip ci]"
+          git push
