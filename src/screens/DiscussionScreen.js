@@ -2,10 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { COLORS, playerColor } from '../theme';
 import { Button, Subtitle } from '../components/ui';
+import { FadeIn, PopIn, Pulse } from '../components/anim';
+import { aliveIndices } from '../state/gameReducer';
 
 export default function DiscussionScreen({ state, dispatch }) {
   const { round, players, timerMin } = state;
   const starter = players[round.starterIndex];
+  const alive = aliveIndices(round, players);
   const [secondsLeft, setSecondsLeft] = useState(timerMin * 60);
 
   useEffect(() => {
@@ -17,39 +20,54 @@ export default function DiscussionScreen({ state, dispatch }) {
   }, [timerMin]);
 
   const timeUp = timerMin > 0 && secondsLeft === 0;
+  const low = timerMin > 0 && secondsLeft <= 30 && !timeUp;
   const mm = Math.floor(secondsLeft / 60);
   const ss = String(secondsLeft % 60).padStart(2, '0');
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.phase}>🗣️ DISCUSSION</Text>
+      <FadeIn>
+        <Text style={styles.phase}>
+          🗣️ DISCUSSION{round.cycle > 1 ? `  ·  ROUND ${round.cycle}` : ''}
+        </Text>
+        {round.cycle > 1 && (
+          <Subtitle style={{ textAlign: 'center', marginTop: 6 }}>
+            {alive.length} players remain
+          </Subtitle>
+        )}
+      </FadeIn>
       <View style={styles.center}>
         <Subtitle style={{ textAlign: 'center' }}>Discussion starts with</Subtitle>
-        <View
-          style={[styles.starterBadge, { backgroundColor: playerColor(starter.colorIndex) }]}
-        >
-          <Text style={styles.starterText}>{starter.name}</Text>
-        </View>
-        <Subtitle style={{ textAlign: 'center', marginTop: 20, paddingHorizontal: 10 }}>
-          Everyone describes the secret word without saying it.{'\n'}
-          Imposters: fake it. Crew: sniff them out.
-        </Subtitle>
+        <PopIn delay={200}>
+          <View
+            style={[styles.starterBadge, { backgroundColor: playerColor(starter.colorIndex) }]}
+          >
+            <Text style={styles.starterText}>{starter.name}</Text>
+          </View>
+        </PopIn>
+        <FadeIn delay={400}>
+          <Subtitle style={{ textAlign: 'center', marginTop: 20, paddingHorizontal: 10 }}>
+            Everyone describes the secret word without saying it.{'\n'}
+            Imposters: fake it. Crew: sniff them out.
+          </Subtitle>
+        </FadeIn>
 
         {timerMin > 0 && (
-          <View style={styles.timerBox}>
-            <Text style={[styles.timer, timeUp && { color: COLORS.danger }]}>
+          <Pulse active={low || timeUp} style={styles.timerBox}>
+            <Text
+              style={[
+                styles.timer,
+                low && { color: COLORS.warn },
+                timeUp && { color: COLORS.danger, fontSize: 40 },
+              ]}
+            >
               {timeUp ? "TIME'S UP!" : `${mm}:${ss}`}
             </Text>
-            {!timeUp && secondsLeft <= 30 && (
-              <Text style={styles.timerWarn}>Wrap it up…</Text>
-            )}
-          </View>
+            {low && <Text style={styles.timerWarn}>Wrap it up…</Text>}
+          </Pulse>
         )}
       </View>
-      <Button
-        title="🗳️  GO TO VOTING"
-        onPress={() => dispatch({ type: 'START_VOTING' })}
-      />
+      <Button title="🗳️  GO TO VOTING" onPress={() => dispatch({ type: 'START_VOTING' })} />
     </View>
   );
 }

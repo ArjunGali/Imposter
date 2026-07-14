@@ -2,80 +2,97 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { COLORS, playerColor } from '../theme';
 import { Button, Card, Subtitle } from '../components/ui';
+import { FadeIn, PopIn } from '../components/anim';
 
 export default function ResultsScreen({ state, dispatch }) {
   const { round, players } = state;
-  const o = round.outcome;
-  const imposterNames = round.imposters.map((i) => players[i].name).join(', ');
+  const crewWins = round.outcome.winner === 'crew';
 
   return (
     <View style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.banner}>{o.crewWins ? '🎉' : '😈'}</Text>
-        <Text style={[styles.verdict, { color: o.crewWins ? COLORS.good : COLORS.accent }]}>
-          {o.crewWins ? 'IMPOSTER CAUGHT!' : 'THE IMPOSTER ESCAPED!'}
-        </Text>
-        <Subtitle style={{ textAlign: 'center', marginTop: 6 }}>
-          {o.tie
-            ? 'The vote was a tie — imposters slip away…'
-            : o.crewWins
-            ? `${players[o.accusedIndex].name} was voted out — and WAS an imposter. Crew +2 each.`
-            : `${players[o.accusedIndex].name} was voted out — but was innocent! Imposters +3 each.`}
-        </Subtitle>
-
-        <Card style={{ marginTop: 20 }}>
-          <Text style={styles.label}>THE WORD WAS</Text>
-          <Text style={styles.word}>{round.word.w}</Text>
-          <Text style={styles.label2}>
-            Imposter hint: “{round.word.h}”
+        <PopIn>
+          <Text style={styles.banner}>{crewWins ? '🎉' : '😈'}</Text>
+          <Text style={[styles.verdict, { color: crewWins ? COLORS.good : COLORS.accent }]}>
+            {crewWins ? 'CREW WINS!' : 'IMPOSTERS WIN!'}
           </Text>
-        </Card>
+          <Subtitle style={{ textAlign: 'center', marginTop: 6 }}>
+            {crewWins
+              ? 'Every imposter was ejected. Crew +2 points each.'
+              : 'The imposters reached the crew’s numbers. Imposters +3 points each.'}
+          </Subtitle>
+        </PopIn>
 
-        <Card style={{ marginTop: 12 }}>
-          <Text style={styles.label}>
-            {round.imposters.length > 1 ? 'THE IMPOSTERS WERE' : 'THE IMPOSTER WAS'}
-          </Text>
-          <Text style={[styles.word, { color: COLORS.accent }]}>{imposterNames}</Text>
-        </Card>
+        <FadeIn delay={200}>
+          <Card style={{ marginTop: 20 }}>
+            <Text style={styles.label}>THE WORD WAS</Text>
+            <Text style={styles.word}>{round.word.w}</Text>
+            <Text style={styles.label2}>Imposter hint: “{round.word.h}”</Text>
+          </Card>
+        </FadeIn>
 
-        <Card style={{ marginTop: 12 }}>
-          <Text style={styles.label}>VOTES</Text>
-          {players.map((p, i) => {
-            const count = o.counts[i] || 0;
-            if (count === 0) return null;
-            return (
-              <View key={p.name} style={styles.voteRow}>
-                <View style={[styles.dot, { backgroundColor: playerColor(p.colorIndex) }]} />
-                <Text style={styles.voteRowName}>
-                  {p.name}
-                  {round.imposters.includes(i) ? ' 🕵️' : ''}
-                </Text>
-                <Text style={styles.voteRowCount}>
-                  {count} vote{count > 1 ? 's' : ''}
-                </Text>
-              </View>
-            );
-          })}
-        </Card>
+        <FadeIn delay={340}>
+          <Card style={{ marginTop: 12 }}>
+            <Text style={styles.label}>
+              {round.imposters.length > 1 ? 'THE IMPOSTERS WERE' : 'THE IMPOSTER WAS'}
+            </Text>
+            <View style={styles.impRow}>
+              {round.imposters.map((i) => (
+                <View
+                  key={i}
+                  style={[styles.impTag, { backgroundColor: playerColor(players[i].colorIndex) }]}
+                >
+                  <Text style={styles.impTagText}>🕵️ {players[i].name}</Text>
+                </View>
+              ))}
+            </View>
+          </Card>
+        </FadeIn>
+
+        <FadeIn delay={480}>
+          <Card style={{ marginTop: 12 }}>
+            <Text style={styles.label}>THIS ROUND</Text>
+            {players.map((p, i) => {
+              const isImposter = round.imposters.includes(i);
+              const won = crewWins ? !isImposter : isImposter;
+              const pts = won ? (crewWins ? 2 : 3) : 0;
+              const wasEjected = round.ejected.includes(i);
+              return (
+                <View key={p.name} style={styles.row}>
+                  <View style={[styles.dot, { backgroundColor: playerColor(p.colorIndex) }]} />
+                  <Text style={styles.rowName}>
+                    {p.name}
+                    {isImposter ? ' 🕵️' : ''}
+                    {wasEjected ? '  (ejected)' : ''}
+                  </Text>
+                  <Text style={[styles.rowPts, pts > 0 && { color: COLORS.good }]}>
+                    {pts > 0 ? `+${pts}` : '—'}
+                  </Text>
+                </View>
+              );
+            })}
+          </Card>
+        </FadeIn>
       </ScrollView>
 
       <View style={styles.footer}>
-        <Button
-          title="End game"
-          variant="ghost"
-          style={{ flex: 1 }}
-          onPress={() => dispatch({ type: 'END_GAME' })}
-        />
-        <Button
-          title="▶ NEXT ROUND"
-          style={{ flex: 2 }}
-          onPress={() => dispatch({ type: 'PLAY_AGAIN' })}
-        />
-      </View>
-      <View style={{ paddingHorizontal: 16, paddingBottom: 14, backgroundColor: COLORS.bg }}>
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <Button
+            title="End game"
+            variant="ghost"
+            style={{ flex: 1 }}
+            onPress={() => dispatch({ type: 'END_GAME' })}
+          />
+          <Button
+            title="▶ NEXT ROUND"
+            style={{ flex: 2 }}
+            onPress={() => dispatch({ type: 'PLAY_AGAIN' })}
+          />
+        </View>
         <Button
           title="🏆 View scoreboard"
           variant="ghost"
+          style={{ marginTop: 10 }}
           onPress={() => dispatch({ type: 'GO', phase: 'scoreboard' })}
         />
       </View>
@@ -87,7 +104,7 @@ const styles = StyleSheet.create({
   scroll: { padding: 20, paddingBottom: 24 },
   banner: { fontSize: 54, textAlign: 'center', marginTop: 8 },
   verdict: {
-    fontSize: 26,
+    fontSize: 28,
     fontWeight: '900',
     textAlign: 'center',
     letterSpacing: 1,
@@ -101,16 +118,16 @@ const styles = StyleSheet.create({
   },
   label2: { color: COLORS.textDim, fontSize: 13, marginTop: 8 },
   word: { color: COLORS.text, fontSize: 26, fontWeight: '900', marginTop: 6 },
-  voteRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
+  impRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  impTag: { borderRadius: 18, paddingHorizontal: 14, paddingVertical: 8 },
+  impTagText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+  row: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
   dot: { width: 12, height: 12, borderRadius: 6, marginRight: 10 },
-  voteRowName: { color: COLORS.text, fontSize: 16, fontWeight: '700', flex: 1 },
-  voteRowCount: { color: COLORS.textDim, fontSize: 14, fontWeight: '700' },
+  rowName: { color: COLORS.text, fontSize: 16, fontWeight: '700', flex: 1 },
+  rowPts: { color: COLORS.textDim, fontSize: 16, fontWeight: '900' },
   footer: {
-    flexDirection: 'row',
-    gap: 10,
     paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 8,
+    paddingVertical: 14,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
     backgroundColor: COLORS.bg,

@@ -1,5 +1,7 @@
-import React, { useEffect, useReducer } from 'react';
-import { SafeAreaView, StatusBar, StyleSheet, View } from 'react-native';
+import React, { useEffect, useReducer, useRef } from 'react';
+import { Animated, BackHandler, StyleSheet, View } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS } from './src/theme';
 import { gameReducer, initialState } from './src/state/gameReducer';
 import { loadScores, saveScores, loadPacks, loadSettings, saveSettings } from './src/storage';
@@ -9,6 +11,7 @@ import SetupScreen from './src/screens/SetupScreen';
 import RevealScreen from './src/screens/RevealScreen';
 import DiscussionScreen from './src/screens/DiscussionScreen';
 import VotingScreen from './src/screens/VotingScreen';
+import EjectionScreen from './src/screens/EjectionScreen';
 import ResultsScreen from './src/screens/ResultsScreen';
 import ScoreboardScreen from './src/screens/ScoreboardScreen';
 import PacksScreen from './src/screens/PacksScreen';
@@ -20,6 +23,7 @@ const SCREENS = {
   reveal: RevealScreen,
   discussion: DiscussionScreen,
   voting: VotingScreen,
+  ejection: EjectionScreen,
   results: ResultsScreen,
   scoreboard: ScoreboardScreen,
   packs: PacksScreen,
@@ -28,6 +32,8 @@ const SCREENS = {
 
 export default function App() {
   const [state, dispatch] = useReducer(gameReducer, initialState);
+  const phaseRef = useRef(state.phase);
+  phaseRef.current = state.phase;
 
   // Hydrate persisted data on launch.
   useEffect(() => {
@@ -56,23 +62,77 @@ export default function App() {
     });
   }, [state.players, state.imposterCount, state.timerMin, state.selectedCategoryIds]);
 
+  // Android back gesture/button: navigate back in-app; only exit from home.
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (phaseRef.current === 'home') return false; // let Android exit
+      dispatch({ type: 'BACK' });
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
+
   const Screen = SCREENS[state.phase] || HomeScreen;
 
-  // key forces remount per reveal/vote turn so per-turn local state resets.
+  // key forces remount per phase/turn/cycle so per-turn local state and
+  // entrance animations reset.
   const screenKey =
     state.phase === 'reveal'
       ? `reveal-${state.round?.revealIndex}`
       : state.phase === 'voting'
-      ? `vote-${state.round?.voteIndex}`
+      ? `vote-${state.round?.cycle}-${state.round?.votePos}`
+      : state.phase === 'discussion'
+      ? `discussion-${state.round?.cycle}`
+      : state.phase === 'ejection'
+      ? `ejection-${state.round?.cycle}`
       : state.phase;
 
   return (
-    <SafeAreaView style={styles.root}>
-      <StatusBar barStyle="light-content" backgroundColor={COLORS.bg} />
-      <View style={styles.container}>
-        <Screen key={screenKey} state={state} dispatch={dispatch} />
-      </View>
-    </SafeAreaView>
+    <SafeAreaProvider>
+      <SafeAreaView style={styles.root} edges={['top', 'bottom', 'left', 'right']}>
+        <StatusBar style="light" backgroundColor={COLORS.bg} />
+        <PhaseTransition screenKey={screenKey}>
+          <Screen key={screenKey} state={state} dispatch={dispatch} />
+        </PhaseTransition>
+      </SafeAreaView>
+    </SafeAreaProvider>
+  );
+}
+
+// Cross-fade + slide between phases for a smooth, app-wide transition.
+function PhaseTransition({ screenKey, children }) {
+  const v = useRef(new Animated.Value(1)).current;
+  const prevKey = useRef(screenKey);
+
+  useEffect(() => {
+    if (prevKey.current !== screenKey) {
+      prevKey.current = screenKey;
+      v.setValue(0);
+      Animated.spring(v, {
+        toValue: 1,
+        friction: 9,
+        tension: 70,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [screenKey, v]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.container,
+        {
+          opacity: v,
+          transform: [
+            {
+              translateY: v.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }),
+            },
+          ],
+        },
+      ]}
+    >
+      {children}
+    </Animated.View>
   );
 }
 

@@ -50,7 +50,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  btnPrimary: { backgroundColor: COLORS.accent },
+  btnPrimary: {
+    backgroundColor: COLORS.accent,
+    shadowColor: COLORS.accent,
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
   btnGhost: {
     backgroundColor: 'transparent',
     borderWidth: 1.5,

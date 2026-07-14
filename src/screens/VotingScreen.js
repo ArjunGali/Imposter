@@ -2,36 +2,35 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { COLORS, playerColor } from '../theme';
 import { Button, Subtitle } from '../components/ui';
+import { FadeIn, PopIn } from '../components/anim';
 
-// Secret ballot, pass-the-phone. Each voter confirms identity, picks a
-// suspect (not themselves), confirms, then hands the phone on.
+// Secret ballot, pass-the-phone. Only surviving players vote, and only
+// surviving players can be voted for. Each voter confirms identity,
+// picks a suspect (not themselves), locks it in, then hands the phone on.
 export default function VotingScreen({ state, dispatch }) {
   const { round, players } = state;
-  const idx = round.voteIndex;
-  const voter = players[idx];
+  const voterIdx = round.voteOrder[round.votePos];
+  const voter = players[voterIdx];
   const color = playerColor(voter.colorIndex);
 
   const [claimed, setClaimed] = useState(false);
   const [choice, setChoice] = useState(null);
 
-  const cast = () => {
-    const votedIndex = choice;
-    setClaimed(false);
-    setChoice(null);
-    dispatch({ type: 'CAST_VOTE', votedIndex });
-  };
-
   if (!claimed) {
     return (
       <View style={styles.wrap}>
-        <Text style={styles.step}>
-          SECRET BALLOT · {idx + 1} OF {players.length}
-        </Text>
+        <FadeIn>
+          <Text style={styles.step}>
+            SECRET BALLOT · {round.votePos + 1} OF {round.voteOrder.length}
+          </Text>
+        </FadeIn>
         <View style={styles.center}>
           <Subtitle style={{ textAlign: 'center' }}>Pass the phone to</Subtitle>
-          <View style={[styles.nameBadge, { backgroundColor: color }]}>
-            <Text style={styles.nameBadgeText}>{voter.name}</Text>
-          </View>
+          <PopIn delay={150}>
+            <View style={[styles.nameBadge, { backgroundColor: color }]}>
+              <Text style={styles.nameBadgeText}>{voter.name}</Text>
+            </View>
+          </PopIn>
         </View>
         <Button title={`I'm ${voter.name} — vote now`} onPress={() => setClaimed(true)} />
       </View>
@@ -42,30 +41,32 @@ export default function VotingScreen({ state, dispatch }) {
     <View style={styles.wrap}>
       <Text style={styles.step}>{voter.name.toUpperCase()}, WHO IS THE IMPOSTER?</Text>
       <ScrollView contentContainerStyle={styles.grid}>
-        {players.map((p, i) => {
-          if (i === idx) return null;
+        {round.voteOrder.map((i, pos) => {
+          if (i === voterIdx) return null;
+          const p = players[i];
           const selected = choice === i;
           const pc = playerColor(p.colorIndex);
           return (
-            <Pressable
-              key={p.name}
-              onPress={() => setChoice(i)}
-              style={[
-                styles.voteCard,
-                { borderColor: pc },
-                selected && { backgroundColor: pc },
-              ]}
-            >
-              <Text style={[styles.voteName, !selected && { color: pc }]}>{p.name}</Text>
-              {selected && <Text style={styles.voteMark}>✔ SUSPECT</Text>}
-            </Pressable>
+            <FadeIn key={p.name} delay={pos * 60} style={styles.voteCardWrap}>
+              <Pressable
+                onPress={() => setChoice(i)}
+                style={[
+                  styles.voteCard,
+                  { borderColor: pc },
+                  selected && { backgroundColor: pc },
+                ]}
+              >
+                <Text style={[styles.voteName, !selected && { color: pc }]}>{p.name}</Text>
+                {selected && <Text style={styles.voteMark}>✔ SUSPECT</Text>}
+              </Pressable>
+            </FadeIn>
           );
         })}
       </ScrollView>
       <Button
         title={choice != null ? `Lock in vote for ${players[choice].name}` : 'Pick a suspect'}
         disabled={choice == null}
-        onPress={cast}
+        onPress={() => dispatch({ type: 'CAST_VOTE', votedIndex: choice })}
       />
     </View>
   );
@@ -97,8 +98,8 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     justifyContent: 'center',
   },
+  voteCardWrap: { width: '47%' },
   voteCard: {
-    width: '47%',
     borderWidth: 2.5,
     borderRadius: 16,
     paddingVertical: 20,

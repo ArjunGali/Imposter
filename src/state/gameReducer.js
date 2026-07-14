@@ -1,10 +1,18 @@
 // Game state machine driven by useReducer.
 //
-// Screens/phases:
-//   home -> setup -> reveal -> discussion -> voting -> results -> (reveal | setup | home)
+// Phases:
+//   home -> setup -> reveal -> discussion -> voting -> ejection
+//                       ^                                 |
+//                       |   (imposters remain, no winner) |
+//                       +---------- discussion <----------+
+//                                                          \
+//                                        (winner decided) -> results
 //   home -> scoreboard / packs / howto
 //
-// A "round" deals one secret word; imposters get only the hint.
+// A round deals one secret word; imposters get only the hint. After each
+// vote the most-voted player is ejected and ONLY their own role is
+// revealed. Crew wins when every imposter is ejected; imposters win when
+// they equal/outnumber the remaining crew. Ties eject nobody.
 
 import { CATEGORIES } from '../data/words';
 
@@ -58,26 +66,42 @@ function pickWord(state) {
   return fresh[Math.floor(Math.random() * fresh.length)];
 }
 
+export function aliveIndices(round, players) {
+  return players.map((_, i) => i).filter((i) => !round.ejected.includes(i));
+}
+
+export function aliveImposters(round) {
+  return round.imposters.filter((i) => !round.ejected.includes(i));
+}
+
 function dealRound(state) {
-  const word = pickWord(state);
   const n = state.players.length;
+  const word = pickWord(state);
   const count = Math.min(state.imposterCount, maxImposters(n));
   const imposterIdx = shuffle(state.players.map((_, i) => i)).slice(0, count);
   return {
     word,
     imposters: imposterIdx, // player indices
+    ejected: [], // player indices voted out, in order
     revealIndex: 0, // whose turn to see their card
-    revealDone: false,
+    cycle: 1, // discussion/vote cycle within this round
     starterIndex: Math.floor(Math.random() * n), // who opens discussion
+    voteOrder: [], // alive player indices, voting order
+    votePos: 0, // position within voteOrder
     votes: {}, // { voterIndex: votedIndex }
-    voteIndex: 0, // whose turn to vote
-    outcome: null, // computed at results
+    lastEjection: null, // { counts, tie, ejectedIndex, wasImposter }
+    outcome: null, // { winner: 'crew' | 'imposters' } once decided
   };
 }
 
-function tallyOutcome(round, players) {
+function pickStarter(round, players) {
+  const alive = aliveIndices(round, players);
+  return alive[Math.floor(Math.random() * alive.length)];
+}
+
+function tallyVotes(votes) {
   const counts = {};
-  Object.values(round.votes).forEach((v) => {
+  Object.values(votes).forEach((v) => {
     counts[v] = (counts[v] || 0) + 1;
   });
   let top = -1;
@@ -92,27 +116,20 @@ function tallyOutcome(round, players) {
       tie = true;
     }
   });
-  const caught = !tie && round.imposters.includes(top);
-  return {
-    counts,
-    accusedIndex: tie ? null : top,
-    tie,
-    crewWins: caught,
-    // Crew catches an imposter: +2 to every crew member.
-    // Tie or wrong accusation: every imposter escapes with +3.
-    pointsPerWinner: caught ? 2 : 3,
-  };
+  return { counts, top, tie };
 }
 
+// Crew catches every imposter: +2 to each crew member.
+// Imposters survive to parity: +3 to each imposter.
 function applyScores(scores, players, round) {
   const next = { ...scores };
-  const { crewWins } = round.outcome;
+  const crewWins = round.outcome.winner === 'crew';
   players.forEach((p, i) => {
     const isImposter = round.imposters.includes(i);
     const prev = next[p.name] || { points: 0, wins: 0, games: 0 };
     const won = crewWins ? !isImposter : isImposter;
     next[p.name] = {
-      points: prev.points + (won ? round.outcome.pointsPerWinner : 0),
+      points: prev.points + (won ? (crewWins ? 2 : 3) : 0),
       wins: prev.wins + (won ? 1 : 0),
       games: prev.games + 1,
     };
@@ -193,33 +210,69 @@ export function gameReducer(state, action) {
     case 'NEXT_REVEAL': {
       const next = state.round.revealIndex + 1;
       if (next >= state.players.length) {
-        return {
-          ...state,
-          phase: 'discussion',
-          round: { ...state.round, revealDone: true },
-        };
+        return { ...state, phase: 'discussion' };
       }
       return { ...state, round: { ...state.round, revealIndex: next } };
     }
 
-    case 'START_VOTING':
-      return { ...state, phase: 'voting' };
+    case 'START_VOTING': {
+      const order = aliveIndices(state.round, state.players);
+      return {
+        ...state,
+        phase: 'voting',
+        round: { ...state.round, voteOrder: order, votePos: 0, votes: {} },
+      };
+    }
 
     case 'CAST_VOTE': {
-      const votes = { ...state.round.votes, [state.round.voteIndex]: action.votedIndex };
-      const next = state.round.voteIndex + 1;
-      if (next >= state.players.length) {
-        const round = { ...state.round, votes };
-        round.outcome = tallyOutcome(round, state.players);
-        return {
-          ...state,
-          phase: 'results',
-          round,
-          scores: applyScores(state.scores, state.players, round),
-          roundsPlayed: state.roundsPlayed + 1,
-        };
+      const r = state.round;
+      const voter = r.voteOrder[r.votePos];
+      const votes = { ...r.votes, [voter]: action.votedIndex };
+      const nextPos = r.votePos + 1;
+      if (nextPos < r.voteOrder.length) {
+        return { ...state, round: { ...r, votes, votePos: nextPos } };
       }
-      return { ...state, round: { ...state.round, votes, voteIndex: next } };
+
+      // Everyone voted: tally and eject.
+      const { counts, top, tie } = tallyVotes(votes);
+      let round = { ...r, votes };
+      if (tie) {
+        round.lastEjection = { counts, tie: true, ejectedIndex: null, wasImposter: false };
+      } else {
+        const wasImposter = round.imposters.includes(top);
+        round.ejected = [...round.ejected, top];
+        round.lastEjection = { counts, tie: false, ejectedIndex: top, wasImposter };
+      }
+
+      // Win check.
+      const impsLeft = aliveImposters(round).length;
+      const crewLeft =
+        aliveIndices(round, state.players).length - impsLeft;
+      let scores = state.scores;
+      let roundsPlayed = state.roundsPlayed;
+      if (impsLeft === 0) {
+        round.outcome = { winner: 'crew' };
+      } else if (impsLeft >= crewLeft) {
+        round.outcome = { winner: 'imposters' };
+      }
+      if (round.outcome) {
+        scores = applyScores(state.scores, state.players, round);
+        roundsPlayed += 1;
+      }
+      return { ...state, phase: 'ejection', round, scores, roundsPlayed };
+    }
+
+    case 'CONTINUE_AFTER_EJECTION': {
+      const r = state.round;
+      if (r.outcome) {
+        return { ...state, phase: 'results' };
+      }
+      const round = {
+        ...r,
+        cycle: r.cycle + 1,
+        starterIndex: pickStarter(r, state.players),
+      };
+      return { ...state, phase: 'discussion', round };
     }
 
     case 'PLAY_AGAIN': {
@@ -240,6 +293,22 @@ export function gameReducer(state, action) {
 
     case 'SET_SCORES':
       return { ...state, scores: action.scores };
+
+    // Android back gesture: step back one screen instead of closing.
+    case 'BACK': {
+      const p = state.phase;
+      if (p === 'setup' || p === 'howto' || p === 'packs') {
+        return { ...state, phase: 'home' };
+      }
+      if (p === 'scoreboard') {
+        return { ...state, phase: state.round?.outcome ? 'results' : 'home' };
+      }
+      if (p === 'results') {
+        return { ...state, phase: 'home', round: null };
+      }
+      // Mid-round screens: ignore (deliberate — no accidental round aborts).
+      return state;
+    }
 
     default:
       return state;
